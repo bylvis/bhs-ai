@@ -29,91 +29,115 @@ import {
 import { Button, GetProp, GetRef, Popover, Space, Spin, message } from 'antd';
 import dayjs from 'dayjs';
 import { useCopilotStyle } from '../styles/CopilotStyles';
-import { MOCK_SESSION_LIST, MOCK_SUGGESTIONS, MOCK_QUESTIONS, AGENT_PLACEHOLDER } from '../constants/mockData';
 import type { BubbleDataType, CopilotProps } from '../types/types';
+
+// 修改 fetchAIStream 支持 abort
+async function fetchAIStreamWithAbort(messages: any[], onData: (data: string) => void, controller: AbortController) {
+  const url = 'http://47.116.185.133:3000/ai/chat/stream'
+  // const url = 'http://localhost:3000/ai/chat/stream'
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
+    signal: controller.signal,
+  });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let lines = buffer.split('\n\n');
+    buffer = lines.pop()!;
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.replace('data: ', '');
+        onData(data);
+      }
+    }
+  }
+}
 
 const Copilot = (props: CopilotProps) => {
   const { copilotOpen, setCopilotOpen } = props;
   const { styles } = useCopilotStyle();
   const attachmentsRef = useRef<GetRef<typeof Attachments>>(null);
-  const abortController = useRef<AbortController>(null);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [msgApi, contextHolder] = message.useMessage();
 
   // ==================== State ====================
-  const [messageHistory, setMessageHistory] = useState<Record<string, any>>({});
-  const [sessionList, setSessionList] = useState(MOCK_SESSION_LIST);
-  const [curSession, setCurSession] = useState(sessionList[0].key);
+  const [sessionList, setSessionList] = useState([
+    { key: '1', label: '新会话', group: 'Today' }
+  ]);
+  const [curSession, setCurSession] = useState('1');
+  const [messageHistory, setMessageHistory] = useState<{ [key: string]: any[] }>({ '1': [] });
+
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [files, setFiles] = useState<GetProp<AttachmentsProps, 'items'>>([]);
   const [inputValue, setInputValue] = useState('');
-
-  // ==================== Runtime ====================
-  const [agent] = useXAgent<BubbleDataType>({
-    baseURL: 'https://api.x.ant.design/api/llm_siliconflow_deepseekr1',
-    model: 'deepseek-ai/DeepSeek-R1',
-    dangerouslyApiKey: 'Bearer sk-xxxxxxxxxxxxxxxxxxxx',
-  });
-  const loading = agent.isRequesting();
-  const { messages, onRequest, setMessages } = useXChat({
-    agent,
-    requestFallback: (_, { error }) => {
-      if (error.name === 'AbortError') {
-        return {
-          content: 'Request is aborted',
-          role: 'assistant',
-        };
-      }
-      return {
-        content: 'Request failed, please try again!',
-        role: 'assistant',
-      };
-    },
-    transformMessage: (info) => {
-      const { originMessage, chunk } = info || {};
-      let currentContent = '';
-      let currentThink = '';
-      try {
-        if (chunk?.data && !chunk?.data.includes('DONE')) {
-          const message = JSON.parse(chunk?.data);
-          currentThink = message?.choices?.[0]?.delta?.reasoning_content || '';
-          currentContent = message?.choices?.[0]?.delta?.content || '';
-        }
-      } catch (error) {
-        console.error(error);
-      }
-      let content = '';
-      if (!originMessage?.content && currentThink) {
-        content = `<think>${currentThink}`;
-      } else if (
-        originMessage?.content?.includes('<think>') &&
-        !originMessage?.content.includes('</think>') &&
-        currentContent
-      ) {
-        content = `${originMessage?.content}</think>${currentContent}`;
-      } else {
-        content = `${originMessage?.content || ''}${currentThink}${currentContent}`;
-      }
-      return {
-        content: content,
-        role: 'assistant',
-      };
-    },
-    resolveAbortController: (controller) => {
-      abortController.current = controller;
-    },
-  });
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState('');
+  const [messages, setMessages] = useState<any[]>([]);
 
   // ==================== Event ====================
-  const handleUserSubmit = (val: string) => {
-    onRequest({
-      stream: true,
-      message: { content: val, role: 'user' },
-    });
-    // session title mock
-    if (sessionList.find((i) => i.key === curSession)?.label === 'New session') {
-      setSessionList(
-        sessionList.map((i) => (i.key !== curSession ? i : { ...i, label: val?.slice(0, 20) })),
-      );
+  const handleSessionChange = (key: string) => {
+    setCurSession(key);
+    setResult('');
+    setMessages(messageHistory[key] || []);
+  };
+
+  const handleNewSession = () => {
+    const newKey = Date.now().toString();
+    setSessionList([{ key: newKey, label: '新会话', group: 'Today' }, ...sessionList]);
+    setMessageHistory(prev => ({ ...prev, [newKey]: [] }));
+    setCurSession(newKey);
+    setMessages([]);
+    setResult('');
+  };
+
+  // 修改 handleUserSubmit 支持 abort
+  const handleUserSubmit = async (val: string) => {
+    setLoading(true);
+    setResult('');
+    const controller = new AbortController();
+    setAbortController(controller);
+    const newMessages = [
+      ...(messageHistory[curSession] || []),
+      { role: 'user', content: val },
+    ];
+    setMessages(newMessages);
+    let assistantContent = '';
+    try {
+      await fetchAIStreamWithAbort(newMessages, (data) => {
+        assistantContent += data;
+        setResult(assistantContent);
+      }, controller);
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        setResult(assistantContent + '\n[已中断]');
+      }
     }
+    setAbortController(null);
+    setMessageHistory(prev => ({
+      ...prev,
+      [curSession]: [
+        ...newMessages,
+        { role: 'assistant', content: assistantContent }
+      ]
+    }));
+    setMessages([
+      ...newMessages,
+      { role: 'assistant', content: assistantContent }
+    ]);
+    setLoading(false);
+    setSessionList(list =>
+      list.map(item =>
+        item.key === curSession && item.label === '新会话'
+          ? { ...item, label: val.slice(0, 20) }
+          : item
+      )
+    );
   };
 
   const onPasteFile = (_: File, files: FileList) => {
@@ -124,55 +148,45 @@ const Copilot = (props: CopilotProps) => {
   };
 
   // ==================== Nodes ====================
+  const sessionPopover = (
+    <Popover
+      placement="bottom"
+      content={
+        <div style={{ minWidth: 200 }}>
+          {sessionList.map((item) => (
+            <div
+              key={item.key}
+              style={{
+                padding: '8px 12px',
+                background: item.key === curSession ? '#f0f0f0' : undefined,
+                cursor: 'pointer',
+                borderRadius: 4,
+                marginBottom: 4,
+              }}
+              onClick={() => handleSessionChange(item.key)}
+            >
+              {item.label}
+            </div>
+          ))}
+        </div>
+      }
+      trigger="click"
+    >
+      <Button type="text" icon={<CommentOutlined />} className={styles.headerButton} />
+    </Popover>
+  );
+
   const chatHeader = (
     <div className={styles.chatHeader}>
-      <div className={styles.headerTitle}>✨ AI Copilot</div>
+      <div className={styles.headerTitle}>✨ 保护散助手</div>
       <Space size={0}>
         <Button
           type="text"
           icon={<PlusOutlined />}
-          onClick={() => {
-            if (messages?.length) {
-              const timeNow = dayjs().valueOf().toString();
-              abortController.current?.abort();
-              setTimeout(() => {
-                setSessionList([
-                  { key: timeNow, label: 'New session', group: 'Today' },
-                  ...sessionList,
-                ]);
-                setCurSession(timeNow);
-                setMessages([]);
-              }, 100);
-            } else {
-              message.error('It is now a new conversation.');
-            }
-          }}
+          onClick={handleNewSession}
           className={styles.headerButton}
         />
-        <Popover
-          placement="bottom"
-          styles={{ body: { padding: 0, maxHeight: 600 } }}
-          content={
-            <Conversations
-              items={sessionList?.map((i) =>
-                i.key === curSession ? { ...i, label: `[current] ${i.label}` } : i,
-              )}
-              activeKey={curSession}
-              groupable
-              onActiveChange={async (val) => {
-                abortController.current?.abort();
-                setTimeout(() => {
-                  setCurSession(val);
-                  setMessages(messageHistory?.[val] || []);
-                }, 100);
-              }}
-              styles={{ item: { padding: '0 8px' } }}
-              className={styles.conversations}
-            />
-          }
-        >
-          <Button type="text" icon={<CommentOutlined />} className={styles.headerButton} />
-        </Popover>
+        {sessionPopover}
         <Button
           type="text"
           icon={<CloseOutlined />}
@@ -184,31 +198,31 @@ const Copilot = (props: CopilotProps) => {
   );
   const chatList = (
     <div className={styles.chatList}>
-      {messages?.length ? (
+      {messages.length ? (
         <Bubble.List
           style={{ height: '100%', paddingInline: 16 }}
-          items={messages?.map((i) => ({
-            ...i.message,
-            classNames: {
-              content: i.status === 'loading' ? styles.loadingMessage : '',
-            },
-            typing: i.status === 'loading' ? { step: 5, interval: 20, suffix: <>💗</> } : false,
-          }))}
+          items={[
+            ...messages,
+            loading && { role: 'assistant', content: result },
+          ].filter(Boolean)}
           roles={{
             assistant: {
               placement: 'start',
-              footer: (
-                <div style={{ display: 'flex' }}>
-                  <Button type="text" size="small" icon={<ReloadOutlined />} />
-                  <Button type="text" size="small" icon={<CopyOutlined />} />
-                  <Button type="text" size="small" icon={<LikeOutlined />} />
-                  <Button type="text" size="small" icon={<DislikeOutlined />} />
-                </div>
+              footer: (item) => (
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CopyOutlined />}
+                  onClick={() => {
+                    navigator.clipboard.writeText(item.content);
+                    msgApi.success('已复制');
+                  }}
+                />
               ),
               loadingRender: () => (
                 <Space>
                   <Spin size="small" />
-                  {AGENT_PLACEHOLDER}
+                  正在生成内容...
                 </Space>
               ),
             },
@@ -216,26 +230,9 @@ const Copilot = (props: CopilotProps) => {
           }}
         />
       ) : (
-        <>
-          <Welcome
-            variant="borderless"
-            title="👋 Hello, I'm Ant Design X"
-            description="Base on Ant Design, AGI product interface solution, create a better intelligent vision~"
-            className={styles.chatWelcome}
-          />
-          <Prompts
-            vertical
-            title="I can help："
-            items={MOCK_QUESTIONS.map((i) => ({ key: i, description: i }))}
-            onItemClick={(info) => handleUserSubmit(info?.data?.description as string)}
-            style={{
-              marginInline: 16,
-            }}
-            styles={{
-              title: { fontSize: 14 },
-            }}
-          />
-        </>
+        <div style={{ textAlign: 'center', color: '#aaa', marginTop: 40 }}>
+          请输入你的问题开始对话
+        </div>
       )}
     </div>
   );
@@ -269,19 +266,19 @@ const Copilot = (props: CopilotProps) => {
       <div className={styles.sendAction}>
         <Button
           icon={<ScheduleOutlined />}
-          onClick={() => handleUserSubmit('What has Ant Design X upgraded?')}
+          onClick={() => handleUserSubmit('分析仓位')}
         >
-          Upgrades
+          分析
         </Button>
         <Button
           icon={<ProductOutlined />}
-          onClick={() => handleUserSubmit('What component assets are available in Ant Design X?')}
+          onClick={() => handleUserSubmit('获取今日行情')}
         >
-          Components
+          获取今日行情
         </Button>
         <Button icon={<AppstoreAddOutlined />}>More</Button>
       </div>
-      <Suggestion items={MOCK_SUGGESTIONS.map((item) => ({ ...item, icon: item.icon || <OpenAIFilled /> }))} onSelect={(itemVal) => setInputValue(`[${itemVal}]:`)}>
+      <Suggestion items={[]} onSelect={(itemVal) => setInputValue(`[${itemVal}]:`)}>
         {({ onTrigger, onKeyDown }) => (
           <Sender
             loading={loading}
@@ -295,7 +292,7 @@ const Copilot = (props: CopilotProps) => {
               setInputValue('');
             }}
             onCancel={() => {
-              abortController.current?.abort();
+              abortController?.abort();
             }}
             allowSpeech
             placeholder="Ask or input / use skills"
@@ -324,21 +321,15 @@ const Copilot = (props: CopilotProps) => {
     </div>
   );
 
-  useEffect(() => {
-    if (messages?.length) {
-      setMessageHistory((prev) => ({
-        ...prev,
-        [curSession]: messages,
-      }));
-    }
-  }, [messages]);
-
   return (
-    <div className={styles.copilotChat} style={{ visibility: copilotOpen ? 'visible' : 'hidden', width: 400, height: '100%'}}>
-      {chatHeader}
-      {chatList}
-      {chatSender}
-    </div>
+    <>
+      {contextHolder}
+      <div className={styles.copilotChat} style={{ visibility: copilotOpen ? 'visible' : 'hidden', width: 400, height: '100%'}}>
+        {chatHeader}
+        {chatList}
+        {chatSender}
+      </div>
+    </>
   );
 };
 
