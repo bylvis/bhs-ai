@@ -14,7 +14,8 @@
     "@originjs/vite-plugin-federation": "1.4.1",
     "antd-style": "^3.7.1",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",

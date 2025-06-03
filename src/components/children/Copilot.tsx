@@ -26,15 +26,15 @@ import {
   ReloadOutlined,
   ScheduleOutlined,
 } from '@ant-design/icons';
-import { Button, GetProp, GetRef, Popover, Space, Spin, message } from 'antd';
+import { Button, GetProp, GetRef, Popover, Space, Spin, message, Switch, Collapse } from 'antd';
 import dayjs from 'dayjs';
 import { useCopilotStyle } from '../styles/CopilotStyles';
 import type { BubbleDataType, CopilotProps } from '../types/types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
-// 修改 fetchAIStream 支持 abort
-async function fetchAIStreamWithAbort(messages: any[], onData: (data: string) => void, controller: AbortController) {
-  const url = 'http://47.116.185.133:3000/ai/chat/stream'
-  // const url = 'http://localhost:3000/ai/chat/stream'
+// 修改 fetchAIStream 支持 abort，支持自定义 url
+async function fetchAIStreamWithAbort(messages: any[], onData: (data: string) => void, controller: AbortController, url: string) {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -71,14 +71,16 @@ const Copilot = (props: CopilotProps) => {
     { key: '1', label: '新会话', group: 'Today' }
   ]);
   const [curSession, setCurSession] = useState('1');
-  const [messageHistory, setMessageHistory] = useState<{ [key: string]: any[] }>({ '1': [] });
+  const [messageHistory, setMessageHistory] = useState<{ [key: string]: (BubbleDataType & { type?: string })[] }>({ '1': [] });
 
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [files, setFiles] = useState<GetProp<AttachmentsProps, 'items'>>([]);
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<(BubbleDataType & { type?: string })[]>([]);
+  const [reasoningMode, setReasoningMode] = useState(false);
+  const [reasoning, setReasoning] = useState('');
 
   // ==================== Event ====================
   const handleSessionChange = (key: string) => {
@@ -96,10 +98,11 @@ const Copilot = (props: CopilotProps) => {
     setResult('');
   };
 
-  // 修改 handleUserSubmit 支持 abort
+  // 支持自定义 url 的 handleUserSubmit
   const handleUserSubmit = async (val: string) => {
     setLoading(true);
     setResult('');
+    setReasoning('');
     const controller = new AbortController();
     setAbortController(controller);
     const newMessages = [
@@ -107,28 +110,64 @@ const Copilot = (props: CopilotProps) => {
       { role: 'user', content: val },
     ];
     setMessages(newMessages);
-    let assistantContent = '';
+    let reasoningBuffer = '';
+    let answerBuffer = '';
+    const url = reasoningMode
+      ? 'http://localhost:3001/ai/chat/reasoning'
+      : 'http://localhost:3001/ai/chat/stream';
     try {
-      await fetchAIStreamWithAbort(newMessages, (data) => {
-        assistantContent += data;
-        setResult(assistantContent);
-      }, controller);
+      await fetchAIStreamWithAbort(
+        newMessages,
+        (data) => {
+          if (reasoningMode) {
+            if (data.startsWith('[reasoning]')) {
+              const reasoningContent = data.replace('[reasoning]', '');
+              reasoningBuffer += reasoningContent;
+              setReasoning(reasoningBuffer);
+            } else if (data.startsWith('[answer]')) {
+              const answerContent = data.replace('[answer]', '');
+              answerBuffer += answerContent;
+              setResult(answerBuffer);
+            }
+          } else {
+            answerBuffer += data;
+            setResult(answerBuffer);
+          }
+        },
+        controller,
+        url
+      );
     } catch (e) {
       if (e.name === 'AbortError') {
-        setResult(assistantContent + '\n[已中断]');
+        setResult(answerBuffer + '\n[已中断]');
       }
     }
     setAbortController(null);
+    // 推理和答案分开展示
+    const assistantMsgs: any[] = [];
+    if (reasoningBuffer) {
+      assistantMsgs.push({
+        role: 'assistant',
+        content: reasoningBuffer,
+        type: 'reasoning',
+      });
+    }
+    if (answerBuffer) {
+      assistantMsgs.push({
+        role: 'assistant',
+        content: answerBuffer,
+        type: 'answer',
+      });
+    }
     setMessageHistory(prev => ({
       ...prev,
       [curSession]: [
         ...newMessages,
-        { role: 'assistant', content: assistantContent }
+        ...assistantMsgs
       ]
     }));
     setMessages([
       ...newMessages,
-      { role: 'assistant', content: assistantContent }
     ]);
     setLoading(false);
     setSessionList(list =>
@@ -198,13 +237,33 @@ const Copilot = (props: CopilotProps) => {
   );
   const chatList = (
     <div className={styles.chatList}>
-      {messages.length ? (
+      {messages.length || reasoning || result ? (
         <Bubble.List
           style={{ height: '100%', paddingInline: 16 }}
           items={[
-            ...messages,
-            loading && { role: 'assistant', content: result },
-          ].filter(Boolean)}
+            ...messages.filter(msg => msg.content && msg.content !== '').map((msg) => {
+              if (msg.type === 'reasoning') {
+                return {
+                  ...msg,
+                  content: renderReasoningCollapse(msg.content, false),
+                };
+              }
+              if (msg.type === 'answer') {
+                return {
+                  ...msg,
+                  content: <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>,
+                };
+              }
+              return msg;
+            }),
+            reasoning && {
+              role: 'assistant',
+              content: renderReasoningCollapse(reasoning, true),
+              type: 'reasoning',
+            },
+            result && { role: 'assistant', content: <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>, type: 'answer' },
+            loading && !result && { role: 'assistant', content: '正在生成内容...', type: 'loading' },
+          ].filter(Boolean) as any[]}
           roles={{
             assistant: {
               placement: 'start',
@@ -214,7 +273,15 @@ const Copilot = (props: CopilotProps) => {
                   size="small"
                   icon={<CopyOutlined />}
                   onClick={() => {
-                    navigator.clipboard.writeText(item.content);
+                    // 兼容 content 可能为 React 元素
+                    const text = typeof item.content === 'string'
+                      ? item.content
+                      : (item.content?.props?.children
+                          ? Array.isArray(item.content.props.children)
+                            ? item.content.props.children.map(child => typeof child === 'string' ? child : '').join('')
+                            : item.content.props.children
+                          : '');
+                    navigator.clipboard.writeText(text);
                     msgApi.success('已复制');
                   }}
                 />
@@ -276,7 +343,13 @@ const Copilot = (props: CopilotProps) => {
         >
           获取今日行情
         </Button>
-        <Button icon={<AppstoreAddOutlined />}>More</Button>
+        <Switch
+          checked={reasoningMode}
+          onChange={setReasoningMode}
+          checkedChildren="思考模式"
+          unCheckedChildren="普通模式"
+          style={{ marginLeft: 12 }}
+        />
       </div>
       <Suggestion items={[]} onSelect={(itemVal) => setInputValue(`[${itemVal}]:`)}>
         {({ onTrigger, onKeyDown }) => (
@@ -332,5 +405,37 @@ const Copilot = (props: CopilotProps) => {
     </>
   );
 };
+
+// Collapse 折叠渲染推理气泡
+const renderReasoningCollapse = (content: string, expanded = false) => (
+  <Collapse
+    size="small"
+    bordered={false}
+    style={{ background: 'transparent', marginBottom: 4 }}
+    {...(expanded ? { defaultActiveKey: ['1'] } : [])}
+  >
+    <Collapse.Panel
+      header={
+        <span style={{ color: '#888', fontStyle: 'italic', fontWeight: 500 }}>
+          推理过程（点击展开/收起）
+        </span>
+      }
+      key="1"
+    >
+      <div
+        style={{
+          background: '#f5f5f5',
+          border: '1px dashed #bfbfbf',
+          borderRadius: 8,
+          padding: '8px 12px',
+          color: '#888',
+          fontStyle: 'italic',
+        }}
+      >
+        {content}
+      </div>
+    </Collapse.Panel>
+  </Collapse>
+);
 
 export default Copilot; 
