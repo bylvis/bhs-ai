@@ -34,6 +34,16 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './Copilot.css';
 
+// 动态获取 API base url
+function getApiBaseUrl() {
+  // Vite 环境变量优先，类型兼容
+  const viteUrl = typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_API_BASE_URL;
+  if (viteUrl && viteUrl !== '/') {
+    return viteUrl;
+  }
+  return 'http://localhost:3001';
+}
+
 // 修改 fetchAIStream 支持 abort，支持自定义 url
 async function fetchAIStreamWithAbort(messages: any[], onData: (data: string) => void, controller: AbortController, url: string) {
   const response = await fetch(url, {
@@ -137,6 +147,7 @@ const Copilot = (props: CopilotProps) => {
 
   // 支持自定义 url 的 handleUserSubmit
   const handleUserSubmit = async (val: string) => {
+    if (loading) return; // 防止重复请求
     setLoading(true);
     setResult('');
     setReasoning('');
@@ -150,25 +161,33 @@ const Copilot = (props: CopilotProps) => {
     setMessages(newMessages);
     let reasoningBuffer = '';
     let answerBuffer = '';
-    const url = reasoningMode
-      ? 'http://localhost:3001/ai/chat/reasoning'
-      : 'http://localhost:3001/ai/chat/stream';
+    const url = getApiBaseUrl() + (reasoningMode
+      ? '/ai/chat/reasoning'
+      : '/ai/chat/stream');
     try {
       await fetchAIStreamWithAbort(
         newMessages,
         (data) => {
+          let parsed;
+          try {
+            parsed = JSON.parse(data);
+          } catch (e) {
+            // 兼容非JSON格式
+            answerBuffer += data;
+            setResult(answerBuffer);
+            return;
+          }
+
           if (reasoningMode) {
-            if (data.startsWith('[reasoning]')) {
-              const reasoningContent = data.replace('[reasoning]', '');
-              reasoningBuffer += reasoningContent;
+            if (parsed.type === 'reasoning') {
+              reasoningBuffer += parsed.content;
               setReasoning(reasoningBuffer);
-            } else if (data.startsWith('[answer]')) {
-              const answerContent = data.replace('[answer]', '');
-              answerBuffer += answerContent;
+            } else if (parsed.type === 'answer') {
+              answerBuffer += parsed.content;
               setResult(answerBuffer);
             }
           } else {
-            answerBuffer += data;
+            answerBuffer += parsed.content;
             setResult(answerBuffer);
           }
         },
@@ -400,12 +419,14 @@ const Copilot = (props: CopilotProps) => {
         <Button
           icon={<ScheduleOutlined />}
           onClick={() => handleUserSubmit('分析仓位')}
+          disabled={loading}
         >
           分析
         </Button>
         <Button
           icon={<ProductOutlined />}
           onClick={() => handleUserSubmit('获取今日行情')}
+          disabled={loading}
         >
           获取今日行情
         </Button>
@@ -415,6 +436,7 @@ const Copilot = (props: CopilotProps) => {
           checkedChildren="思考模式"
           unCheckedChildren="普通模式"
           style={{ marginLeft: 12 }}
+          disabled={loading}
         />
       </div>
       <Suggestion items={[]} onSelect={(itemVal) => setInputValue(`[${itemVal}]:`)}>

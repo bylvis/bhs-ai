@@ -49,12 +49,12 @@ echo $TIMESTAMP > ./latest-image-tag.txt
 echo "镜像标签已保存到 latest-image-tag.txt 文件"
 
 # Git操作：添加标签文件、提交并推送到远程仓库
-echo "提交Git更新..."
-git add . || true
-git commit -m "更新镜像标签: $TIMESTAMP" || true
-git push || true  # Git操作失败不应该影响部署
+echo "请自行提交Git更新..."
+# git add . || true
+# git commit -m "更新镜像标签: $TIMESTAMP" || true
+# git push || true  # Git操作失败不应该影响部署
 
-echo "Git更新已推送"
+# echo "Git更新已推送"
 
 # 服务器从阿里云拉取容器
 # docker pull registry.cn-shanghai.aliyuncs.com/bhstech/bhs-ai:[镜像版本号]
