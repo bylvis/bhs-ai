@@ -59,6 +59,10 @@ async function fetchAIStreamWithAbort(messages: any[], onData: (data: string) =>
   }
 }
 
+// 定义 localStorage 的 key
+const SESSION_LIST_KEY = 'copilot_session_list';
+const MESSAGE_HISTORY_KEY = 'copilot_message_history';
+
 const Copilot = (props: CopilotProps) => {
   const { copilotOpen, setCopilotOpen } = props;
   const { styles } = useCopilotStyle();
@@ -67,11 +71,15 @@ const Copilot = (props: CopilotProps) => {
   const [msgApi, contextHolder] = message.useMessage();
 
   // ==================== State ====================
-  const [sessionList, setSessionList] = useState([
-    { key: '1', label: '新会话', group: 'Today' }
-  ]);
+  const [sessionList, setSessionList] = useState(() => {
+    const stored = localStorage.getItem(SESSION_LIST_KEY);
+    return stored ? JSON.parse(stored) : [{ key: '1', label: '新会话', group: 'Today' }];
+  });
   const [curSession, setCurSession] = useState('1');
-  const [messageHistory, setMessageHistory] = useState<{ [key: string]: (BubbleDataType & { type?: string })[] }>({ '1': [] });
+  const [messageHistory, setMessageHistory] = useState(() => {
+    const stored = localStorage.getItem(MESSAGE_HISTORY_KEY);
+    return stored ? JSON.parse(stored) : { '1': [] };
+  });
 
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [files, setFiles] = useState<GetProp<AttachmentsProps, 'items'>>([]);
@@ -251,7 +259,11 @@ const Copilot = (props: CopilotProps) => {
               if (msg.type === 'answer') {
                 return {
                   ...msg,
-                  content: <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>,
+                  content: (
+                    <div className="copilot-markdown">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                    </div>
+                  ),
                 };
               }
               return msg;
@@ -261,7 +273,11 @@ const Copilot = (props: CopilotProps) => {
               content: renderReasoningCollapse(reasoning, true),
               type: 'reasoning',
             },
-            result && { role: 'assistant', content: <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>, type: 'answer' },
+            result && { role: 'assistant', content: (
+              <div className="copilot-markdown">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
+              </div>
+            ), type: 'answer' },
             loading && !result && { role: 'assistant', content: '正在生成内容...', type: 'loading' },
           ].filter(Boolean) as any[]}
           roles={{
@@ -393,6 +409,16 @@ const Copilot = (props: CopilotProps) => {
       </Suggestion>
     </div>
   );
+
+  // 持久化 sessionList
+  useEffect(() => {
+    localStorage.setItem(SESSION_LIST_KEY, JSON.stringify(sessionList));
+  }, [sessionList]);
+
+  // 持久化 messageHistory
+  useEffect(() => {
+    localStorage.setItem(MESSAGE_HISTORY_KEY, JSON.stringify(messageHistory));
+  }, [messageHistory]);
 
   return (
     <>
