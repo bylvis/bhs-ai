@@ -1,0 +1,111 @@
+.copilot-markdown {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #23272f;
+  word-break: break-word;
+  background: none;
+}
+
+.copilot-markdown h1 {
+  font-size: 1.25em;
+  font-weight: 700;
+  margin: 1.2em 0 0.7em 0;
+  background-clip: text;
+  border: none;
+  padding: 0;
+}
+
+.copilot-markdown h2 {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin: 1.1em 0 0.6em 0;
+  border: none;
+  padding: 0;
+}
+
+.copilot-markdown h3 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 1em 0 0.5em 0;
+}
+
+.copilot-markdown h4,
+.copilot-markdown h5,
+.copilot-markdown h6 {
+  font-size: 0.98em;
+  color: #3b3b3b;
+  font-weight: 600;
+  margin: 0.9em 0 0.4em 0;
+}
+
+.copilot-markdown p {
+  margin: 0.4em 0;
+}
+
+.copilot-markdown ul,
+.copilot-markdown ol {
+  margin: 0.4em 0 0.4em 1.3em;
+  padding: 0;
+}
+
+.copilot-markdown li {
+  margin: 0.15em 0;
+}
+
+.copilot-markdown a {
+  color: #2563eb;
+  text-decoration: underline;
+  transition: color 0.2s;
+}
+.copilot-markdown a:hover {
+  color: #1e40af;
+}
+
+.copilot-markdown code {
+  background: #f3f6fa;
+  color: #d6336c;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.97em;
+  font-family: 'JetBrains Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+}
+
+.copilot-markdown pre {
+  background: #f3f6fa;
+  border-radius: 6px;
+  padding: 10px 14px;
+  overflow-x: auto;
+  font-size: 0.97em;
+  margin: 1em 0;
+  border: none;
+}
+
+.copilot-markdown blockquote {
+  border-left: 3px solid #2563eb;
+  background: #f7faff;
+  color: #555;
+  padding: 7px 14px;
+  margin: 0.8em 0;
+  border-radius: 4px;
+  font-style: italic;
+}
+
+.copilot-markdown table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+  font-size: 0.98em;
+  background: #fafbfc;
+}
+
+.copilot-markdown th,
+.copilot-markdown td {
+  border: 1px solid #e3e7ef;
+  padding: 5px 10px;
+  text-align: left;
+}
+
+.copilot-markdown th {
+  background: #f0f4fa;
+  font-weight: 600;
+}

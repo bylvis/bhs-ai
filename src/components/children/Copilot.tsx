@@ -32,6 +32,7 @@ import { useCopilotStyle } from '../styles/CopilotStyles';
 import type { BubbleDataType, CopilotProps } from '../types/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import './Copilot.css';
 
 // 修改 fetchAIStream 支持 abort，支持自定义 url
 async function fetchAIStreamWithAbort(messages: any[], onData: (data: string) => void, controller: AbortController, url: string) {
@@ -73,12 +74,12 @@ const Copilot = (props: CopilotProps) => {
   // ==================== State ====================
   const [sessionList, setSessionList] = useState(() => {
     const stored = localStorage.getItem(SESSION_LIST_KEY);
-    return stored ? JSON.parse(stored) : [{ key: '1', label: '新会话', group: 'Today' }];
+    return stored ? JSON.parse(stored) : [];
   });
-  const [curSession, setCurSession] = useState('1');
+  const [curSession, setCurSession] = useState('');
   const [messageHistory, setMessageHistory] = useState(() => {
     const stored = localStorage.getItem(MESSAGE_HISTORY_KEY);
-    return stored ? JSON.parse(stored) : { '1': [] };
+    return stored ? JSON.parse(stored) : {};
   });
 
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
@@ -99,11 +100,39 @@ const Copilot = (props: CopilotProps) => {
 
   const handleNewSession = () => {
     const newKey = Date.now().toString();
-    setSessionList([{ key: newKey, label: '新会话', group: 'Today' }, ...sessionList]);
-    setMessageHistory(prev => ({ ...prev, [newKey]: [] }));
     setCurSession(newKey);
     setMessages([]);
     setResult('');
+    // 不立即加入 sessionList/messageHistory，等首次提问时再加
+  };
+
+  // 挂载时自动新建会话
+  useEffect(() => {
+    handleNewSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 删除会话
+  const handleDeleteSession = (key: string) => {
+    if (sessionList.length === 1) {
+      msgApi.warning('至少保留一个会话');
+      return;
+    }
+    const newSessionList = sessionList.filter(item => item.key !== key);
+    const newMessageHistory = { ...messageHistory };
+    delete newMessageHistory[key];
+    setSessionList(newSessionList);
+    setMessageHistory(newMessageHistory);
+    // 如果删除的是当前会话，切换到下一个或新建
+    if (curSession === key) {
+      if (newSessionList.length > 0) {
+        setCurSession(newSessionList[0].key);
+        setMessages(newMessageHistory[newSessionList[0].key] || []);
+        setResult('');
+      } else {
+        handleNewSession();
+      }
+    }
   };
 
   // 支持自定义 url 的 handleUserSubmit
@@ -113,6 +142,7 @@ const Copilot = (props: CopilotProps) => {
     setReasoning('');
     const controller = new AbortController();
     setAbortController(controller);
+    const isNewSession = !sessionList.some(item => item.key === curSession);
     const newMessages = [
       ...(messageHistory[curSession] || []),
       { role: 'user', content: val },
@@ -178,13 +208,21 @@ const Copilot = (props: CopilotProps) => {
       ...newMessages,
     ]);
     setLoading(false);
-    setSessionList(list =>
-      list.map(item =>
-        item.key === curSession && item.label === '新会话'
-          ? { ...item, label: val.slice(0, 20) }
-          : item
-      )
-    );
+    // 首次提问时才加入 sessionList
+    if (isNewSession) {
+      setSessionList(list => [
+        { key: curSession, label: val.slice(0, 20), group: 'Today' },
+        ...list
+      ]);
+    } else {
+      setSessionList(list =>
+        list.map(item =>
+          item.key === curSession && item.label === '新会话'
+            ? { ...item, label: val.slice(0, 20) }
+            : item
+        )
+      );
+    }
   };
 
   const onPasteFile = (_: File, files: FileList) => {
@@ -209,10 +247,22 @@ const Copilot = (props: CopilotProps) => {
                 cursor: 'pointer',
                 borderRadius: 4,
                 marginBottom: 4,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
               }}
               onClick={() => handleSessionChange(item.key)}
             >
-              {item.label}
+              <span>{item.label}</span>
+              {sessionList.length > 1 && (
+                <CloseOutlined
+                  style={{ marginLeft: 8, color: '#bbb', fontSize: 14, cursor: 'pointer' }}
+                  onClick={e => {
+                    e.stopPropagation();
+                    handleDeleteSession(item.key);
+                  }}
+                />
+              )}
             </div>
           ))}
         </div>
