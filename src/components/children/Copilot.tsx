@@ -27,12 +27,13 @@ import {
   ScheduleOutlined,
 } from '@ant-design/icons';
 import { Button, GetProp, GetRef, Popover, Space, Spin, message, Switch, Collapse } from 'antd';
-import dayjs from 'dayjs';
 import { useCopilotStyle } from '../styles/CopilotStyles';
 import type { BubbleDataType, CopilotProps } from '../types/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import './Copilot.css';
+import '../styles/Copilot.css';
+import AgentReasoningGroupCollapse from './AgentReasoningGroupCollapse';
+import ReasoningStepCard from './ReasoningStepCard';
 
 // 动态获取 API base url
 function getApiBaseUrl() {
@@ -45,11 +46,11 @@ function getApiBaseUrl() {
 }
 
 // 修改 fetchAIStream 支持 abort，支持自定义 url
-async function fetchAIStreamWithAbort(messages: any[], onData: (data: string) => void, controller: AbortController, url: string) {
+async function fetchAIStreamWithAbort(body: any, onData: (data: string) => void, controller: AbortController, url: string) {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify(body),
     signal: controller.signal,
   });
   const reader = response.body!.getReader();
@@ -98,9 +99,9 @@ const Copilot = (props: CopilotProps) => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
   const [messages, setMessages] = useState<(BubbleDataType & { type?: string })[]>([]);
+  const [agentMode, setAgentMode] = useState(false);
   const [reasoningMode, setReasoningMode] = useState(false);
-  const [reasoning, setReasoning] = useState('');
-
+  const [reasoning, setReasoning] = useState<string | any[]>("");
   // ==================== Event ====================
   const handleSessionChange = (key: string) => {
     setCurSession(key);
@@ -145,6 +146,19 @@ const Copilot = (props: CopilotProps) => {
     }
   };
 
+  // 模式切换：普通/智能体互斥，切回普通模式时自动关闭思考模式，避免参数混乱
+  const handleAgentModeBtn = () => {
+    setAgentMode(true);
+  };
+  const handleNormalModeBtn = () => {
+    setAgentMode(false);
+    setReasoningMode(false); // 关键：切回普通模式自动关闭思考
+  };
+  // 思考模式独立切换
+  const handleReasoningModeBtn = () => {
+    setReasoningMode((prev) => !prev);
+  };
+
   // 支持自定义 url 的 handleUserSubmit
   const handleUserSubmit = async (val: string) => {
     if (loading) return; // 防止重复请求
@@ -161,12 +175,26 @@ const Copilot = (props: CopilotProps) => {
     setMessages(newMessages);
     let reasoningBuffer = '';
     let answerBuffer = '';
-    const url = getApiBaseUrl() + (reasoningMode
-      ? '/ai/chat/reasoning'
-      : '/ai/chat/stream');
+    let url, fetchBody;
+    if (agentMode) {
+      url = getApiBaseUrl() + '/ai/dashscope-proxy-stream';
+      fetchBody = {
+        prompt: val,
+        ...(reasoningMode ? { has_thoughts: true } : {}), // 仅 agent+reasoning 时传递
+        // 其他参数可扩展
+      };
+    } else {
+      if (reasoningMode) {
+        url = getApiBaseUrl() + '/ai/chat/reasoning';
+        fetchBody = { messages: newMessages };
+      } else {
+        url = getApiBaseUrl() + '/ai/chat/stream';
+        fetchBody = { messages: newMessages };
+      }
+    }
     try {
       await fetchAIStreamWithAbort(
-        newMessages,
+        fetchBody,
         (data) => {
           let parsed;
           try {
@@ -177,11 +205,16 @@ const Copilot = (props: CopilotProps) => {
             setResult(answerBuffer);
             return;
           }
-
           if (reasoningMode) {
             if (parsed.type === 'reasoning') {
-              reasoningBuffer += parsed.content;
-              setReasoning(reasoningBuffer);
+              if(agentMode){
+                console.log(210,parsed)
+                reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
+                setReasoning(reasoningBuffer);
+              }else {
+                reasoningBuffer += parsed.content;
+                setReasoning(reasoningBuffer);
+              }
             } else if (parsed.type === 'answer') {
               answerBuffer += parsed.content;
               setResult(answerBuffer);
@@ -339,7 +372,7 @@ const Copilot = (props: CopilotProps) => {
             }),
             reasoning && {
               role: 'assistant',
-              content: renderReasoningCollapse(reasoning, true),
+              content:  renderReasoningCollapse(renderReasoning(reasoning), true),
               type: 'reasoning',
             },
             result && { role: 'assistant', content: (
@@ -347,7 +380,7 @@ const Copilot = (props: CopilotProps) => {
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
               </div>
             ), type: 'answer' },
-            loading && !result && { role: 'assistant', content: '正在生成内容...', type: 'loading' },
+            loading && !result && { role: 'assistant', content: (<Space><Spin size="small" /> 正在生成内容...</Space>), type: 'loading' },
           ].filter(Boolean) as any[]}
           roles={{
             assistant: {
@@ -424,20 +457,29 @@ const Copilot = (props: CopilotProps) => {
           分析
         </Button>
         <Button
-          icon={<ProductOutlined />}
-          onClick={() => handleUserSubmit('获取今日行情')}
+          type={!agentMode ? 'primary' : 'default'}
+          onClick={handleNormalModeBtn}
           disabled={loading}
+          style={{ marginLeft: 8 }}
         >
-          获取今日行情
+          普通模式
         </Button>
-        <Switch
-          checked={reasoningMode}
-          onChange={setReasoningMode}
-          checkedChildren="思考模式"
-          unCheckedChildren="普通模式"
-          style={{ marginLeft: 12 }}
+        <Button
+          type={agentMode ? 'primary' : 'default'}
+          onClick={handleAgentModeBtn}
           disabled={loading}
-        />
+          style={{ marginLeft: 8 }}
+        >
+          智能体模式
+        </Button>
+        <Button
+          type={reasoningMode ? 'primary' : 'default'}
+          onClick={handleReasoningModeBtn}
+          disabled={loading}
+          style={{ marginLeft: 8 }}
+        >
+          思考模式
+        </Button>
       </div>
       <Suggestion items={[]} onSelect={(itemVal) => setInputValue(`[${itemVal}]:`)}>
         {({ onTrigger, onKeyDown }) => (
@@ -530,10 +572,51 @@ const renderReasoningCollapse = (content: string, expanded = false) => (
           fontStyle: 'italic',
         }}
       >
-        {content}
+        { content.includes('[agent_reasoning]') ? renderAgentReasoning(content) : content }
       </div>
     </Collapse.Panel>
   </Collapse>
 );
+const renderAgentReasoning = (content: string) => {
+  let agentReasoningArr: any[] = content.split('[agent_reasoning]').map(item=>{
+    try {
+      return JSON.parse(item)
+    } catch (e) {
+      // console.log(e);
+    }
+  }).flat()
+  agentReasoningArr = agentReasoningArr.filter(item=>item)
+  const agentReasoningArrMap = agentReasoningArr.reduce((acc, item) => {
+    acc[item.action_name] = acc[item.action_name] || []
+    acc[item.action_name].push(item)
+    return acc
+  }, {})
+  return <div>
+    {
+      Object.keys(agentReasoningArrMap).map(item => (
+        <AgentReasoningGroupCollapse
+          key={item}
+          groupType={item}
+          steps={agentReasoningArrMap[item]}
+        />
+      ))
+    }
+  </div>
+}
+// 推理渲染：直接返回字符串
+const renderReasoning = (reasoning) => reasoning;
+
+// 辅助函数：格式化 JSON 字符串或对象
+function formatJson(val: any) {
+  if (!val) return '';
+  try {
+    if (typeof val === 'string') {
+      return JSON.stringify(JSON.parse(val), null, 2);
+    }
+    return JSON.stringify(val, null, 2);
+  } catch {
+    return val;
+  }
+}
 
 export default Copilot; 
