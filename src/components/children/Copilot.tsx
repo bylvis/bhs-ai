@@ -3,27 +3,16 @@ import {
   Attachments,
   type AttachmentsProps,
   Bubble,
-  Conversations,
-  Prompts,
   Sender,
-  Suggestion,
-  Welcome,
-  useXAgent,
-  useXChat,
+  Suggestion
 } from '@ant-design/x';
 import {
-  AppstoreAddOutlined,
   CloseOutlined,
   CloudUploadOutlined,
   CommentOutlined,
   CopyOutlined,
-  DislikeOutlined,
-  LikeOutlined,
-  OpenAIFilled,
   PaperClipOutlined,
   PlusOutlined,
-  ProductOutlined,
-  ReloadOutlined,
   ScheduleOutlined,
 } from '@ant-design/icons';
 import { Button, GetProp, GetRef, Popover, Space, Spin, message, Switch, Collapse } from 'antd';
@@ -32,8 +21,7 @@ import type { BubbleDataType, CopilotProps } from '../types/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import '../styles/Copilot.css';
-import AgentReasoningGroupCollapse from './AgentReasoningGroupCollapse';
-import ReasoningStepCard from './ReasoningStepCard';
+import ThoughtChain from './ThoughtChain';
 
 // 动态获取 API base url
 function getApiBaseUrl() {
@@ -99,7 +87,7 @@ const Copilot = (props: CopilotProps) => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
   const [messages, setMessages] = useState<(BubbleDataType & { type?: string })[]>([]);
-  const [agentMode, setAgentMode] = useState(false);
+  const [agentMode, setAgentMode] = useState(true);
   const [reasoningMode, setReasoningMode] = useState(false);
   const [reasoning, setReasoning] = useState<string | any[]>("");
   // ==================== Event ====================
@@ -149,14 +137,12 @@ const Copilot = (props: CopilotProps) => {
   // 模式切换：普通/智能体互斥，切回普通模式时自动关闭思考模式，避免参数混乱
   const handleAgentModeBtn = () => {
     setAgentMode(true);
-  };
-  const handleNormalModeBtn = () => {
-    setAgentMode(false);
-    setReasoningMode(false); // 关键：切回普通模式自动关闭思考
+    setReasoningMode(false);
   };
   // 思考模式独立切换
   const handleReasoningModeBtn = () => {
-    setReasoningMode((prev) => !prev);
+    setReasoningMode(true);
+    setAgentMode(false);
   };
 
   // 支持自定义 url 的 handleUserSubmit
@@ -180,7 +166,7 @@ const Copilot = (props: CopilotProps) => {
       url = getApiBaseUrl() + '/ai/dashscope-proxy-stream';
       fetchBody = {
         prompt: val,
-        ...(reasoningMode ? { has_thoughts: true } : {}), // 仅 agent+reasoning 时传递
+        has_thoughts: true // 仅 agent+reasoning 时传递
         // 其他参数可扩展
       };
     } else {
@@ -205,24 +191,42 @@ const Copilot = (props: CopilotProps) => {
             setResult(answerBuffer);
             return;
           }
-          if (reasoningMode) {
+
+          if(agentMode) {
             if (parsed.type === 'reasoning') {
-              if(agentMode){
-                console.log(210,parsed)
-                reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
-                setReasoning(reasoningBuffer);
-              }else {
-                reasoningBuffer += parsed.content;
-                setReasoning(reasoningBuffer);
-              }
+              reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
+              setReasoning(reasoningBuffer);
             } else if (parsed.type === 'answer') {
               answerBuffer += parsed.content;
               setResult(answerBuffer);
             }
-          } else {
-            answerBuffer += parsed.content;
-            setResult(answerBuffer);
+          }else {
+            if (reasoningMode) {
+              reasoningBuffer += parsed.content;
+              setReasoning(reasoningBuffer);
+            } else {
+              answerBuffer += parsed.content;
+              setResult(answerBuffer);
+            }
           }
+
+          // if (reasoningMode) {
+          //   if (parsed.type === 'reasoning') {
+          //     if(agentMode){
+          //       reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
+          //       setReasoning(reasoningBuffer);
+          //     }else {
+          //       reasoningBuffer += parsed.content;
+          //       setReasoning(reasoningBuffer);
+          //     }
+          //   } else if (parsed.type === 'answer') {
+          //     answerBuffer += parsed.content;
+          //     setResult(answerBuffer);
+          //   }
+          // } else {
+          //   answerBuffer += parsed.content;
+          //   setResult(answerBuffer);
+          // }
         },
         controller,
         url
@@ -457,14 +461,6 @@ const Copilot = (props: CopilotProps) => {
           分析
         </Button>
         <Button
-          type={!agentMode ? 'primary' : 'default'}
-          onClick={handleNormalModeBtn}
-          disabled={loading}
-          style={{ marginLeft: 8 }}
-        >
-          普通模式
-        </Button>
-        <Button
           type={agentMode ? 'primary' : 'default'}
           onClick={handleAgentModeBtn}
           disabled={loading}
@@ -586,22 +582,7 @@ const renderAgentReasoning = (content: string) => {
     }
   }).flat()
   agentReasoningArr = agentReasoningArr.filter(item=>item)
-  const agentReasoningArrMap = agentReasoningArr.reduce((acc, item) => {
-    acc[item.action_name] = acc[item.action_name] || []
-    acc[item.action_name].push(item)
-    return acc
-  }, {})
-  return <div>
-    {
-      Object.keys(agentReasoningArrMap).map(item => (
-        <AgentReasoningGroupCollapse
-          key={item}
-          groupType={item}
-          steps={agentReasoningArrMap[item]}
-        />
-      ))
-    }
-  </div>
+  return <ThoughtChain content={agentReasoningArr} />
 }
 // 推理渲染：直接返回字符串
 const renderReasoning = (reasoning) => reasoning;

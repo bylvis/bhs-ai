@@ -109,3 +109,12 @@
   background: #f0f4fa;
   font-weight: 600;
 }
+.thought-chain-card {
+  padding: 0;
+}
+.ant-card-body {
+  padding: 5px !important;
+}
+.ant-collapse-content-box {
+  padding: 0 !important;
+}
