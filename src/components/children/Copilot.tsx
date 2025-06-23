@@ -192,41 +192,23 @@ const Copilot = (props: CopilotProps) => {
             return;
           }
 
-          if(agentMode) {
+          if (reasoningMode) {
             if (parsed.type === 'reasoning') {
-              reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
-              setReasoning(reasoningBuffer);
+              if(agentMode){
+                reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
+                setReasoning(reasoningBuffer);
+              }else {
+                reasoningBuffer += parsed.content;
+                setReasoning(reasoningBuffer);
+              }
             } else if (parsed.type === 'answer') {
               answerBuffer += parsed.content;
               setResult(answerBuffer);
             }
-          }else {
-            if (reasoningMode) {
-              reasoningBuffer += parsed.content;
-              setReasoning(reasoningBuffer);
-            } else {
-              answerBuffer += parsed.content;
-              setResult(answerBuffer);
-            }
+          } else {
+            answerBuffer += parsed.content;
+            setResult(answerBuffer);
           }
-
-          // if (reasoningMode) {
-          //   if (parsed.type === 'reasoning') {
-          //     if(agentMode){
-          //       reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
-          //       setReasoning(reasoningBuffer);
-          //     }else {
-          //       reasoningBuffer += parsed.content;
-          //       setReasoning(reasoningBuffer);
-          //     }
-          //   } else if (parsed.type === 'answer') {
-          //     answerBuffer += parsed.content;
-          //     setResult(answerBuffer);
-          //   }
-          // } else {
-          //   answerBuffer += parsed.content;
-          //   setResult(answerBuffer);
-          // }
         },
         controller,
         url
@@ -543,7 +525,10 @@ const Copilot = (props: CopilotProps) => {
 };
 
 // Collapse 折叠渲染推理气泡
-const renderReasoningCollapse = (content: string, expanded = false) => (
+const renderReasoningCollapse = (content: string, expanded = false) => {
+  console.log(547, content);
+  
+  return (
   <Collapse
     size="small"
     bordered={false}
@@ -572,7 +557,8 @@ const renderReasoningCollapse = (content: string, expanded = false) => (
       </div>
     </Collapse.Panel>
   </Collapse>
-);
+  )
+}
 const renderAgentReasoning = (content: string) => {
   let agentReasoningArr: any[] = content.split('[agent_reasoning]').map(item=>{
     try {
