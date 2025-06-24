@@ -1,17 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Attachments,
-  type AttachmentsProps,
   Bubble,
   Sender,
   Suggestion
 } from '@ant-design/x';
 import {
   CloseOutlined,
-  CloudUploadOutlined,
   CommentOutlined,
   CopyOutlined,
-  PaperClipOutlined,
   PlusOutlined,
   ScheduleOutlined,
 } from '@ant-design/icons';
@@ -22,6 +18,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import '../styles/Copilot.css';
 import ThoughtChain from './ThoughtChain';
+import { useCopilotSession } from '../hooks/useCopilotSession';
 
 // 动态获取 API base url
 function getApiBaseUrl() {
@@ -66,23 +63,15 @@ const MESSAGE_HISTORY_KEY = 'copilot_message_history';
 const Copilot = (props: CopilotProps) => {
   const { copilotOpen, setCopilotOpen } = props;
   const { styles } = useCopilotStyle();
-  const attachmentsRef = useRef<GetRef<typeof Attachments>>(null);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [msgApi, contextHolder] = message.useMessage();
 
-  // ==================== State ====================
-  const [sessionList, setSessionList] = useState(() => {
-    const stored = localStorage.getItem(SESSION_LIST_KEY);
-    return stored ? JSON.parse(stored) : [];
-  });
-  const [curSession, setCurSession] = useState('');
-  const [messageHistory, setMessageHistory] = useState(() => {
-    const stored = localStorage.getItem(MESSAGE_HISTORY_KEY);
-    return stored ? JSON.parse(stored) : {};
-  });
+  const {
+    sessionList, setSessionList,
+    curSession, setCurSession,
+    messageHistory, setMessageHistory
+  } = useCopilotSession();
 
-  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
-  const [files, setFiles] = useState<GetProp<AttachmentsProps, 'items'>>([]);
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
@@ -90,26 +79,36 @@ const Copilot = (props: CopilotProps) => {
   const [agentMode, setAgentMode] = useState(true);
   const [reasoningMode, setReasoningMode] = useState(false);
   const [reasoning, setReasoning] = useState<string | any[]>("");
-  // ==================== Event ====================
+
+  // 切换会话
   const handleSessionChange = (key: string) => {
     setCurSession(key);
     setResult('');
     setMessages(messageHistory[key] || []);
   };
 
+  // 新建会话
   const handleNewSession = () => {
     const newKey = Date.now().toString();
     setCurSession(newKey);
     setMessages([]);
     setResult('');
-    // 不立即加入 sessionList/messageHistory，等首次提问时再加
   };
 
   // 挂载时自动新建会话
   useEffect(() => {
     handleNewSession();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 持久化 sessionList
+  useEffect(() => {
+    localStorage.setItem(SESSION_LIST_KEY, JSON.stringify(sessionList));
+  }, [sessionList]);
+
+  // 持久化 messageHistory
+  useEffect(() => {
+    localStorage.setItem(MESSAGE_HISTORY_KEY, JSON.stringify(messageHistory));
+  }, [messageHistory]);
 
   // 删除会话
   const handleDeleteSession = (key: string) => {
@@ -139,6 +138,7 @@ const Copilot = (props: CopilotProps) => {
     setAgentMode(true);
     setReasoningMode(false);
   };
+
   // 思考模式独立切换
   const handleReasoningModeBtn = () => {
     setReasoningMode(true);
@@ -257,14 +257,7 @@ const Copilot = (props: CopilotProps) => {
     }
   };
 
-  const onPasteFile = (_: File, files: FileList) => {
-    for (const file of files) {
-      attachmentsRef.current?.upload(file);
-    }
-    setAttachmentsOpen(true);
-  };
-
-  // ==================== Nodes ====================
+  // 顶部气泡
   const sessionPopover = (
     <Popover
       placement="bottom"
@@ -305,6 +298,7 @@ const Copilot = (props: CopilotProps) => {
     </Popover>
   );
 
+  // 顶部标题
   const chatHeader = (
     <div className={styles.chatHeader}>
       <div className={styles.headerTitle}>✨ 保护散助手</div>
@@ -325,6 +319,8 @@ const Copilot = (props: CopilotProps) => {
       </Space>
     </div>
   );
+
+  // 聊天列表
   const chatList = (
     <div className={styles.chatList}>
       {messages.length || reasoning || result ? (
@@ -332,12 +328,14 @@ const Copilot = (props: CopilotProps) => {
           style={{ height: '100%', paddingInline: 16 }}
           items={[
             ...messages.filter(msg => msg.content && msg.content !== '').map((msg) => {
+              // 推理气泡
               if (msg.type === 'reasoning') {
                 return {
                   ...msg,
                   content: renderReasoningCollapse(msg.content, false),
                 };
               }
+              // 答案气泡
               if (msg.type === 'answer') {
                 return {
                   ...msg,
@@ -350,40 +348,42 @@ const Copilot = (props: CopilotProps) => {
               }
               return msg;
             }),
+            // 推理气泡
             reasoning && {
               role: 'assistant',
               content:  renderReasoningCollapse(renderReasoning(reasoning), true),
               type: 'reasoning',
             },
+            // 答案气泡
             result && { role: 'assistant', content: (
               <div className="copilot-markdown">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
               </div>
             ), type: 'answer' },
+            // 加载中气泡
             loading && !result && { role: 'assistant', content: (<Space><Spin size="small" /> 正在生成内容...</Space>), type: 'loading' },
           ].filter(Boolean) as any[]}
           roles={{
             assistant: {
               placement: 'start',
-              footer: (item) => (
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<CopyOutlined />}
-                  onClick={() => {
-                    // 兼容 content 可能为 React 元素
-                    const text = typeof item.content === 'string'
-                      ? item.content
-                      : (item.content?.props?.children
-                          ? Array.isArray(item.content.props.children)
-                            ? item.content.props.children.map(child => typeof child === 'string' ? child : '').join('')
-                            : item.content.props.children
-                          : '');
-                    navigator.clipboard.writeText(text);
-                    msgApi.success('已复制');
-                  }}
-                />
-              ),
+              footer: (item) => {
+                const text = item?.props?.children?.props?.children
+                if(typeof text === 'string' || typeof text?.props?.children === 'string'){
+                  // 复制按钮
+                  return(
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<CopyOutlined />}
+                      onClick={() => {
+                        navigator.clipboard.writeText(typeof text === 'string' ? text : text.props.children);
+                        msgApi.success('已复制');
+                      }}
+                    />
+                  )
+                }
+                return null;
+              },
               loadingRender: () => (
                 <Space>
                   <Spin size="small" />
@@ -401,34 +401,12 @@ const Copilot = (props: CopilotProps) => {
       )}
     </div>
   );
-  const sendHeader = (
-    <Sender.Header
-      title="Upload File"
-      styles={{ content: { padding: 0 } }}
-      open={attachmentsOpen}
-      onOpenChange={setAttachmentsOpen}
-      forceRender
-    >
-      <Attachments
-        ref={attachmentsRef}
-        beforeUpload={() => false}
-        items={files}
-        onChange={({ fileList }) => setFiles(fileList)}
-        placeholder={(type) =>
-          type === 'drop'
-            ? { title: 'Drop file here' }
-            : {
-                icon: <CloudUploadOutlined />,
-                title: 'Upload files',
-                description: 'Click or drag files to this area to upload',
-              }
-        }
-      />
-    </Sender.Header>
-  );
+
+  // 底部按钮
   const chatSender = (
     <div className={styles.chatSend}>
       <div className={styles.sendAction}>
+        {/* 分析按钮 */}
         <Button
           icon={<ScheduleOutlined />}
           onClick={() => handleUserSubmit('分析仓位')}
@@ -436,6 +414,7 @@ const Copilot = (props: CopilotProps) => {
         >
           分析
         </Button>
+        {/* 智能体模式按钮 */}
         <Button
           type={agentMode ? 'primary' : 'default'}
           onClick={handleAgentModeBtn}
@@ -444,6 +423,7 @@ const Copilot = (props: CopilotProps) => {
         >
           智能体模式
         </Button>
+        {/* 思考模式按钮 */}
         <Button
           type={reasoningMode ? 'primary' : 'default'}
           onClick={handleReasoningModeBtn}
@@ -453,6 +433,7 @@ const Copilot = (props: CopilotProps) => {
           思考模式
         </Button>
       </div>
+      {/* 输入框 */}
       <Suggestion items={[]} onSelect={(itemVal) => setInputValue(`[${itemVal}]:`)}>
         {({ onTrigger, onKeyDown }) => (
           <Sender
@@ -469,42 +450,13 @@ const Copilot = (props: CopilotProps) => {
             onCancel={() => {
               abortController?.abort();
             }}
-            allowSpeech
             placeholder="Ask or input / use skills"
             onKeyDown={onKeyDown}
-            header={sendHeader}
-            prefix={
-              <Button
-                type="text"
-                icon={<PaperClipOutlined style={{ fontSize: 18 }} />}
-                onClick={() => setAttachmentsOpen(!attachmentsOpen)}
-              />
-            }
-            onPasteFile={onPasteFile}
-            actions={(_, info) => {
-              const { SendButton, LoadingButton, SpeechButton } = info.components;
-              return (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <SpeechButton className={styles.speechButton} />
-                  {loading ? <LoadingButton type="default" /> : <SendButton type="primary" />}
-                </div>
-              );
-            }}
           />
         )}
       </Suggestion>
     </div>
   );
-
-  // 持久化 sessionList
-  useEffect(() => {
-    localStorage.setItem(SESSION_LIST_KEY, JSON.stringify(sessionList));
-  }, [sessionList]);
-
-  // 持久化 messageHistory
-  useEffect(() => {
-    localStorage.setItem(MESSAGE_HISTORY_KEY, JSON.stringify(messageHistory));
-  }, [messageHistory]);
 
   return (
     <>
@@ -551,6 +503,8 @@ const renderReasoningCollapse = (content: string, expanded = false) => {
   </Collapse>
   )
 }
+
+// 渲染智能体推理过程
 const renderAgentReasoning = (content: string) => {
   let agentReasoningArr: any[] = content.split('[agent_reasoning]').map(item=>{
     try {
@@ -562,20 +516,8 @@ const renderAgentReasoning = (content: string) => {
   agentReasoningArr = agentReasoningArr.filter(item=>item)
   return <ThoughtChain content={agentReasoningArr} />
 }
+
 // 推理渲染：直接返回字符串
 const renderReasoning = (reasoning) => reasoning;
-
-// 辅助函数：格式化 JSON 字符串或对象
-function formatJson(val: any) {
-  if (!val) return '';
-  try {
-    if (typeof val === 'string') {
-      return JSON.stringify(JSON.parse(val), null, 2);
-    }
-    return JSON.stringify(val, null, 2);
-  } catch {
-    return val;
-  }
-}
 
 export default Copilot; 

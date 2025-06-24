@@ -62,7 +62,7 @@ function getStatusIcon(status: string) {
   }
 }
 const App: React.FC<{content: any}> = ({content}) => {
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [status, setStatus] = useState('success')
 
