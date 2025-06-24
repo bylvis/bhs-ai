@@ -191,21 +191,15 @@ const Copilot = (props: CopilotProps) => {
             setResult(answerBuffer);
             return;
           }
-
-          if (reasoningMode) {
-            if (parsed.type === 'reasoning') {
-              if(agentMode){
-                reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
-                setReasoning(reasoningBuffer);
-              }else {
-                reasoningBuffer += parsed.content;
-                setReasoning(reasoningBuffer);
-              }
-            } else if (parsed.type === 'answer') {
-              answerBuffer += parsed.content;
-              setResult(answerBuffer);
+          if (parsed.type === 'reasoning') {
+            if(agentMode){
+              reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
+              setReasoning(reasoningBuffer);
+            }else {
+              reasoningBuffer += parsed.content;
+              setReasoning(reasoningBuffer);
             }
-          } else {
+          } else if (parsed.type === 'answer') {
             answerBuffer += parsed.content;
             setResult(answerBuffer);
           }
@@ -526,8 +520,6 @@ const Copilot = (props: CopilotProps) => {
 
 // Collapse 折叠渲染推理气泡
 const renderReasoningCollapse = (content: string, expanded = false) => {
-  console.log(547, content);
-  
   return (
   <Collapse
     size="small"
