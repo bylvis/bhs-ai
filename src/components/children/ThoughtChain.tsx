@@ -4,51 +4,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import formatJson from '../utils/formatJson';
 import { Card, Typography } from 'antd';
 import { CheckCircleOutlined, InfoCircleOutlined, LoadingOutlined } from '@ant-design/icons';
+import { MockContentProps, ObservationItem } from '../types/types';
 
-const { Paragraph, Text } = Typography;
+const { Paragraph } = Typography;
 
-interface ObservationItem {
-  title: string;
-  content: string;
-  webSearch?: boolean;
-  webSearchUrl?: string;
-  dataName?: string;
-  display?: boolean;
-  id?: string;
-  rankWeight?: number;
-  referenceIndex?: number;
-  rejectStatus?: boolean;
-  score?: number;
-  scoreWithWeight?: number;
-}
-
-interface MockContentProps {
-  observation: string; // JSON 字符串，内容为 ObservationItem[]
-  action_input_stream?: string;
-  arguments?: string;
-  action_name?: string;
-  action_type?: string;
-}
-const mockContent = (props: MockContentProps) => {
-  const content: ObservationItem[] = JSON.parse(props.observation)
-  return (
-    <Typography>
-        <div style={{ marginBottom: 4 }}>
-          <b style={{ color: '#555' }}>参数：</b>
-          <pre style={{ background: '#fff', borderRadius: 4, padding: 8, margin: 0, fontSize: 13, color: '#222', border: '1px solid #e4e8ee' }}>
-            {formatJson(props.arguments)}
-          </pre>
-        </div>
-      {Array.isArray(content) && content.map((item: ObservationItem,index:number) => (
-        <Paragraph key={index}>
-          {item.title && <div><strong>标题：</strong> {item.title}</div>}
-          {item.content && <div><strong>内容：</strong> {item.content}</div>}
-          {item.webSearch && <div><strong>链接：</strong> <a href={item.webSearch ? item.webSearchUrl : ''} target="_blank">{item.webSearch ? item.webSearchUrl : ''}</a></div>}
-        </Paragraph>
-      ))}
-    </Typography>
-  )
-}
 function getStatusIcon(status: string) {
   switch (status) {
     case 'success':
@@ -61,27 +20,20 @@ function getStatusIcon(status: string) {
       return undefined;
   }
 }
-const App: React.FC<{content: any}> = ({content}) => {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+const App: React.FC<{content: any, isLoading: boolean}> = React.memo(({content, isLoading}) => {
 
   const [status, setStatus] = useState('success')
 
   useEffect(() => {
-    setStatus('pending')
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
+    if(isLoading){
+      setStatus('pending');
+    }else{
+      setStatus('success');
     }
-    timerRef.current = setTimeout(() => {
-      // 定时器到期，全部变 success
-      setStatus('success')
-    }, 1000)
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [content.length])
+  }, [isLoading]);
 
-  const items = content.filter((item: any) => item.action_input_stream).map((item: MockContentProps,index:number) => {
-
+  const items = content.map((item: MockContentProps,index:number) => {
+    
     return {
       key: `step-${index + 1}`,
       title: item.action_name,
@@ -91,7 +43,6 @@ const App: React.FC<{content: any}> = ({content}) => {
       status: status,
     }
   });
-
   const [expandedKeys, setExpandedKeys] = useState(['item-2']);
 
   const collapsible: ThoughtChainProps['collapsible'] = {
@@ -105,6 +56,35 @@ const App: React.FC<{content: any}> = ({content}) => {
       <ThoughtChain items={items} collapsible={collapsible} />
     </Card>
   );
-};
+});
 
+
+const mockContent = (props: MockContentProps) => {
+  const { observation, thought, arguments: argumentsContent } = props; 
+  const observationContent: ObservationItem[] = JSON.parse(observation || '[]')
+  return (
+    <Typography>
+      {/* 思考过程 */}
+      <div>
+        {thought}
+      </div>
+      {/* 参数 */}
+       {argumentsContent !== undefined && <div style={{ marginBottom: 4 }}>
+          <b style={{ color: '#555' }}>参数：</b>
+          <pre style={{ background: '#fff', borderRadius: 4, padding: 8, margin: 0, fontSize: 13, color: '#222', border: '1px solid #e4e8ee' }}>
+            {formatJson(argumentsContent)}
+          </pre>
+        </div>
+        }
+      {Array.isArray(observationContent) && observationContent.map((item: ObservationItem,index:number) => (
+        <Paragraph key={index}>
+          {typeof item === 'string' && <div>{item}</div>}
+          {item.title && <div><strong>标题：</strong> {item.title}</div>}
+          {item.content && <div><strong>内容：</strong> {item.content}</div>}
+          {item.webSearch && <div><strong>链接：</strong> <a href={item.webSearch ? item.webSearchUrl : ''} target="_blank">{item.webSearch ? item.webSearchUrl : ''}</a></div>}
+        </Paragraph>
+      ))}
+    </Typography>
+  )
+}
 export default App;

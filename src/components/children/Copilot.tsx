@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Bubble,
   Sender,
@@ -11,9 +11,9 @@ import {
   PlusOutlined,
   ScheduleOutlined,
 } from '@ant-design/icons';
-import { Button, GetProp, GetRef, Popover, Space, Spin, message, Switch, Collapse } from 'antd';
+import { Button, Popover, Space, Spin, message, Collapse } from 'antd';
 import { useCopilotStyle } from '../styles/CopilotStyles';
-import type { BubbleDataType, CopilotProps } from '../types/types';
+import type { CopilotProps } from '../types/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import '../styles/Copilot.css';
@@ -56,207 +56,149 @@ async function fetchAIStreamWithAbort(body: any, onData: (data: string) => void,
   }
 }
 
-// 定义 localStorage 的 key
-const SESSION_LIST_KEY = 'copilot_session_list';
-const MESSAGE_HISTORY_KEY = 'copilot_message_history';
-
 const Copilot = (props: CopilotProps) => {
+  // 开关
   const { copilotOpen, setCopilotOpen } = props;
+  // 样式
   const { styles } = useCopilotStyle();
+  // 控制器 打断对话
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  // 全局消息
   const [msgApi, contextHolder] = message.useMessage();
 
-  const {
-    sessionList, setSessionList,
-    curSession, setCurSession,
-    messageHistory, setMessageHistory
-  } = useCopilotSession();
-
+  // 输入框
   const [inputValue, setInputValue] = useState('');
+  // 加载中
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState('');
-  const [messages, setMessages] = useState<(BubbleDataType & { type?: string })[]>([]);
-  const [agentMode, setAgentMode] = useState(true);
-  const [reasoningMode, setReasoningMode] = useState(false);
-  const [reasoning, setReasoning] = useState<string | any[]>("");
+  // 当前会话
+  const [curSession, setCurSession] = useState<string>('');
+  // 聊天列表
+  const [chatList, setChatList] = useState(JSON.parse(localStorage.getItem(`copilot_message_${curSession}`) || '[]'))
+  
+  const { handleNewSession, deleteSession } = useCopilotSession();
 
-  // 切换会话
-  const handleSessionChange = (key: string) => {
-    setCurSession(key);
-    setResult('');
-    setMessages(messageHistory[key] || []);
-  };
-
-  // 新建会话
-  const handleNewSession = () => {
-    const newKey = Date.now().toString();
-    setCurSession(newKey);
-    setMessages([]);
-    setResult('');
-  };
-
-  // 挂载时自动新建会话
+  const [sessionList, setSessionList] = useState(JSON.parse(localStorage.getItem('copilot_session_list') || '[]'));
   useEffect(() => {
-    handleNewSession();
+    setCurSession(sessionList[0].key);
   }, []);
+  // 在组件中添加 ref
+  const chatListRef = useRef<HTMLDivElement>(null);
 
-  // 持久化 sessionList
-  useEffect(() => {
-    localStorage.setItem(SESSION_LIST_KEY, JSON.stringify(sessionList));
-  }, [sessionList]);
-
-  // 持久化 messageHistory
-  useEffect(() => {
-    localStorage.setItem(MESSAGE_HISTORY_KEY, JSON.stringify(messageHistory));
-  }, [messageHistory]);
-
-  // 删除会话
-  const handleDeleteSession = (key: string) => {
-    if (sessionList.length === 1) {
-      msgApi.warning('至少保留一个会话');
-      return;
-    }
-    const newSessionList = sessionList.filter(item => item.key !== key);
-    const newMessageHistory = { ...messageHistory };
-    delete newMessageHistory[key];
-    setSessionList(newSessionList);
-    setMessageHistory(newMessageHistory);
-    // 如果删除的是当前会话，切换到下一个或新建
-    if (curSession === key) {
-      if (newSessionList.length > 0) {
-        setCurSession(newSessionList[0].key);
-        setMessages(newMessageHistory[newSessionList[0].key] || []);
-        setResult('');
-      } else {
-        handleNewSession();
+  function handleScroll() {
+    if (chatListRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = chatListRef.current;
+      // 检查是否在最底部
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 允许一定的误差
+      if (isAtBottom) {
+        setTimeout(() => {
+          if (chatListRef.current) { // 添加 null 检查
+            chatListRef.current.scrollTop = chatListRef.current.scrollHeight;
+          }
+        }, 100);
       }
     }
-  };
+  }
 
-  // 模式切换：普通/智能体互斥，切回普通模式时自动关闭思考模式，避免参数混乱
-  const handleAgentModeBtn = () => {
-    setAgentMode(true);
-    setReasoningMode(false);
-  };
+  // 会话切换 滚动到聊天列表底部
+  useEffect(() => {
+    setChatList(JSON.parse(localStorage.getItem(`copilot_message_${curSession}`) || '[]'));
+    handleScroll();
+  }, [curSession]);
 
-  // 思考模式独立切换
-  const handleReasoningModeBtn = () => {
-    setReasoningMode(true);
-    setAgentMode(false);
-  };
+  useEffect(() => {
+    handleScroll();
+  }, []);
 
   // 支持自定义 url 的 handleUserSubmit
   const handleUserSubmit = async (val: string) => {
     if (loading) return; // 防止重复请求
+    const sessionList = JSON.parse(localStorage.getItem('copilot_session_list') || '[]');
+    const session = sessionList.find(item => item.key === curSession);
+    if(session){
+      session.label = val;
+    }
+    localStorage.setItem('copilot_session_list',JSON.stringify(sessionList));
+    setSessionList(sessionList);
     setLoading(true);
-    setResult('');
-    setReasoning('');
     const controller = new AbortController();
     setAbortController(controller);
-    const isNewSession = !sessionList.some(item => item.key === curSession);
-    const newMessages = [
-      ...(messageHistory[curSession] || []),
-      { role: 'user', content: val },
-    ];
-    setMessages(newMessages);
-    let reasoningBuffer = '';
-    let answerBuffer = '';
-    let url, fetchBody;
-    if (agentMode) {
-      url = getApiBaseUrl() + '/ai/dashscope-proxy-stream';
-      fetchBody = {
-        prompt: val,
-        has_thoughts: true // 仅 agent+reasoning 时传递
-        // 其他参数可扩展
-      };
-    } else {
-      if (reasoningMode) {
-        url = getApiBaseUrl() + '/ai/chat/reasoning';
-        fetchBody = { messages: newMessages };
-      } else {
-        url = getApiBaseUrl() + '/ai/chat/stream';
-        fetchBody = { messages: newMessages };
-      }
-    }
+    let url = getApiBaseUrl() + '/ai/dashscope-proxy-stream';
+    let fetchBody = {
+      prompt: val,
+      has_thoughts: true,
+      session_id:chatList[chatList.length - 1]?.response?.output?.session_id,
+      // 其他参数可扩展
+    };
     try {
+      // 立即更新聊天列表
+      setChatList(prev => {
+        const updatedList = [...prev, { send: val, type: 'temp' }];
+        return updatedList;
+      });
+      handleScroll();
       await fetchAIStreamWithAbort(
         fetchBody,
         (data) => {
-          let parsed;
-          try {
-            parsed = JSON.parse(data);
-          } catch (e) {
-            // 兼容非JSON格式
-            answerBuffer += data;
-            setResult(answerBuffer);
-            return;
-          }
-          if (parsed.type === 'reasoning') {
-            if(agentMode){
-              reasoningBuffer += JSON.stringify(parsed.content) + '[agent_reasoning]';
-              setReasoning(reasoningBuffer);
-            }else {
-              reasoningBuffer += parsed.content;
-              setReasoning(reasoningBuffer);
+          const parsed = JSON.parse(data);
+          setChatList(prev => prev.map(item => item.type === 'temp' ? { ...item, response: parsed } : item));
+          setChatList([
+            ...chatList,
+            {
+              send:val,
+              response:parsed
             }
-          } else if (parsed.type === 'answer') {
-            answerBuffer += parsed.content;
-            setResult(answerBuffer);
+          ]);
+          if(parsed.output.finish_reason === 'stop'){
+            localStorage.setItem(`copilot_message_${curSession}`,JSON.stringify([...chatList, { send: val, response: parsed }]));
           }
+          // 在更新后检查是否在最底部
+          handleScroll();
         },
         controller,
         url
       );
     } catch (e) {
-      if (e.name === 'AbortError') {
-        setResult(answerBuffer + '\n[已中断]');
-      }
+
     }
     setAbortController(null);
-    // 推理和答案分开展示
-    const assistantMsgs: any[] = [];
-    if (reasoningBuffer) {
-      assistantMsgs.push({
-        role: 'assistant',
-        content: reasoningBuffer,
-        type: 'reasoning',
-      });
-    }
-    if (answerBuffer) {
-      assistantMsgs.push({
-        role: 'assistant',
-        content: answerBuffer,
-        type: 'answer',
-      });
-    }
-    setMessageHistory(prev => ({
-      ...prev,
-      [curSession]: [
-        ...newMessages,
-        ...assistantMsgs
-      ]
-    }));
-    setMessages([
-      ...newMessages,
-    ]);
     setLoading(false);
-    // 首次提问时才加入 sessionList
-    if (isNewSession) {
-      setSessionList(list => [
-        { key: curSession, label: val.slice(0, 20), group: 'Today' },
-        ...list
-      ]);
-    } else {
-      setSessionList(list =>
-        list.map(item =>
-          item.key === curSession && item.label === '新会话'
-            ? { ...item, label: val.slice(0, 20) }
-            : item
-        )
-      );
-    }
   };
 
+  // 会话切换
+  const handleSessionChange = (key: string) => {
+    // 切换到选定的会话
+    const selectedSession = sessionList.find(session => session.key === key);
+    if (selectedSession) {
+      // 更新当前会话状态
+      setCurSession(selectedSession.key);
+    }
+  };
+  // 会话删除 自动选取第一个
+  const handlerDeleteSession = (key: string) => {
+    deleteSession(key);
+    localStorage.removeItem(`copilot_message_${key}`);
+    
+    // 过滤掉被删除的会话
+    const updatedSessionList = sessionList.filter(item => item.key !== key);
+    setSessionList(updatedSessionList);
+    
+    // 检查更新后的 sessionList 是否为空
+    if (updatedSessionList.length > 0) {
+        setCurSession(updatedSessionList[0].key); // 设置为新的第一个会话
+    } else {
+        setCurSession(''); // 或者设置为 null，表示没有当前会话
+    }
+}
+  // 会话新增
+  const handleNewSessionFn = () => {
+    if(loading) return;
+    const newKey = new Date().getTime().toString();
+    handleNewSession(newKey);
+    setSessionList(sessionList.concat({key: newKey, label: newKey}));
+    setCurSession(newKey);
+    localStorage.setItem(`copilot_message_${newKey}`,JSON.stringify([]));
+    setChatList([]);
+  }
   // 顶部气泡
   const sessionPopover = (
     <Popover
@@ -266,35 +208,33 @@ const Copilot = (props: CopilotProps) => {
           {sessionList.map((item) => (
             <div
               key={item.key}
+              onClick={() => handleSessionChange(item.key)}
               style={{
                 padding: '8px 12px',
-                background: item.key === curSession ? '#f0f0f0' : undefined,
                 cursor: 'pointer',
+                background: item.key === curSession ? '#f0f0f0' : undefined,
                 borderRadius: 4,
                 marginBottom: 4,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
               }}
-              onClick={() => handleSessionChange(item.key)}
             >
               <span>{item.label}</span>
-              {sessionList.length > 1 && (
-                <CloseOutlined
-                  style={{ marginLeft: 8, color: '#bbb', fontSize: 14, cursor: 'pointer' }}
-                  onClick={e => {
-                    e.stopPropagation();
-                    handleDeleteSession(item.key);
-                  }}
-                />
-              )}
+              <CloseOutlined
+                style={{ marginLeft: 8, color: '#bbb', fontSize: 14, cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  handlerDeleteSession(item.key);
+                }}
+              />
             </div>
           ))}
         </div>
       }
       trigger="click"
     >
-      <Button type="text" icon={<CommentOutlined />} className={styles.headerButton} />
+      <Button disabled={loading} type="text" icon={<CommentOutlined />} className={styles.headerButton} />
     </Popover>
   );
 
@@ -305,12 +245,14 @@ const Copilot = (props: CopilotProps) => {
       <Space size={0}>
         <Button
           type="text"
+          disabled={loading}
           icon={<PlusOutlined />}
-          onClick={handleNewSession}
+          onClick={handleNewSessionFn}
           className={styles.headerButton}
         />
         {sessionPopover}
         <Button
+          disabled={loading}
           type="text"
           icon={<CloseOutlined />}
           onClick={() => setCopilotOpen(false)}
@@ -319,89 +261,47 @@ const Copilot = (props: CopilotProps) => {
       </Space>
     </div>
   );
-
   // 聊天列表
-  const chatList = (
-    <div className={styles.chatList}>
-      {messages.length || reasoning || result ? (
-        <Bubble.List
-          style={{ height: '100%', paddingInline: 16 }}
-          items={[
-            ...messages.filter(msg => msg.content && msg.content !== '').map((msg) => {
-              // 推理气泡
-              if (msg.type === 'reasoning') {
-                return {
-                  ...msg,
-                  content: renderReasoningCollapse(msg.content, false),
-                };
-              }
-              // 答案气泡
-              if (msg.type === 'answer') {
-                return {
-                  ...msg,
-                  content: (
-                    <div className="copilot-markdown">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                    </div>
-                  ),
-                };
-              }
-              return msg;
-            }),
-            // 推理气泡
-            reasoning && {
-              role: 'assistant',
-              content:  renderReasoningCollapse(renderReasoning(reasoning), true),
-              type: 'reasoning',
-            },
-            // 答案气泡
-            result && { role: 'assistant', content: (
-              <div className="copilot-markdown">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
-              </div>
-            ), type: 'answer' },
-            // 加载中气泡
-            loading && !result && { role: 'assistant', content: (<Space><Spin size="small" /> 正在生成内容...</Space>), type: 'loading' },
-          ].filter(Boolean) as any[]}
-          roles={{
-            assistant: {
-              placement: 'start',
-              footer: (item) => {
-                const text = item?.props?.children?.props?.children
-                if(typeof text === 'string' || typeof text?.props?.children === 'string'){
-                  // 复制按钮
-                  return(
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<CopyOutlined />}
-                      onClick={() => {
-                        navigator.clipboard.writeText(typeof text === 'string' ? text : text.props.children);
-                        msgApi.success('已复制');
-                      }}
-                    />
-                  )
-                }
-                return null;
-              },
-              loadingRender: () => (
-                <Space>
-                  <Spin size="small" />
-                  正在生成内容...
-                </Space>
-              ),
-            },
-            user: { placement: 'end' },
-          }}
-        />
-      ) : (
-        <div style={{ textAlign: 'center', color: '#aaa', marginTop: 40 }}>
-          请输入你的问题开始对话
-        </div>
-      )}
-    </div>
-  );
+  const newChatList = ( isLoading: boolean ) => {
 
+    const newChatListItems = chatList.map((item: any, index: number) => {
+      if (item.type === 'temp') {
+        return [
+          { role: 'user', content: item.send },
+          { role: 'assistant', content: (<Space><Spin size="small" /> 正在生成内容...</Space>) }
+        ];
+      }
+      
+      return [
+        { role: 'user', content: item.send },
+        { 
+          role: 'assistant', 
+          content: (
+            <div className="copilot-markdown">
+              {renderReasoningCollapse(item.response.output.thoughts, true,  index === chatList.length - 1 ? isLoading : false)}
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.response.output.text}</ReactMarkdown>
+            </div> 
+          )
+        },
+      ];
+    });
+    
+    return (
+      <div  className={styles.chatList} ref={chatListRef}>
+        <div>
+          <Bubble.List
+            style={{ height: '100%', paddingInline: 16 }}
+            items={newChatListItems.flat()}
+            roles={{
+              user: { placement: 'end' },
+              assistant: { placement: 'start' }
+            }}
+          >
+          </Bubble.List>
+        </div>
+      </div>
+    )
+  }
   // 底部按钮
   const chatSender = (
     <div className={styles.chatSend}>
@@ -413,24 +313,6 @@ const Copilot = (props: CopilotProps) => {
           disabled={loading}
         >
           分析
-        </Button>
-        {/* 智能体模式按钮 */}
-        <Button
-          type={agentMode ? 'primary' : 'default'}
-          onClick={handleAgentModeBtn}
-          disabled={loading}
-          style={{ marginLeft: 8 }}
-        >
-          智能体模式
-        </Button>
-        {/* 思考模式按钮 */}
-        <Button
-          type={reasoningMode ? 'primary' : 'default'}
-          onClick={handleReasoningModeBtn}
-          disabled={loading}
-          style={{ marginLeft: 8 }}
-        >
-          思考模式
         </Button>
       </div>
       {/* 输入框 */}
@@ -463,7 +345,7 @@ const Copilot = (props: CopilotProps) => {
       {contextHolder}
       <div className={styles.copilotChat} style={{ visibility: copilotOpen ? 'visible' : 'hidden', width: 400, height: '100%'}}>
         {chatHeader}
-        {chatList}
+        {newChatList(loading)}
         {chatSender}
       </div>
     </>
@@ -471,7 +353,7 @@ const Copilot = (props: CopilotProps) => {
 };
 
 // Collapse 折叠渲染推理气泡
-const renderReasoningCollapse = (content: string, expanded = false) => {
+const renderReasoningCollapse = (content: string, expanded = false, isLoading = false) => {
   return (
   <Collapse
     size="small"
@@ -497,27 +379,11 @@ const renderReasoningCollapse = (content: string, expanded = false) => {
           fontStyle: 'italic',
         }}
       >
-        { content.includes('[agent_reasoning]') ? renderAgentReasoning(content) : content }
+        <ThoughtChain content={content} isLoading={isLoading}/>
       </div>
     </Collapse.Panel>
   </Collapse>
   )
 }
-
-// 渲染智能体推理过程
-const renderAgentReasoning = (content: string) => {
-  let agentReasoningArr: any[] = content.split('[agent_reasoning]').map(item=>{
-    try {
-      return JSON.parse(item)
-    } catch (e) {
-      // console.log(e);
-    }
-  }).flat()
-  agentReasoningArr = agentReasoningArr.filter(item=>item)
-  return <ThoughtChain content={agentReasoningArr} />
-}
-
-// 推理渲染：直接返回字符串
-const renderReasoning = (reasoning) => reasoning;
 
 export default Copilot; 
