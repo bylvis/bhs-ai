@@ -79,7 +79,11 @@ const Copilot = (props: CopilotProps) => {
 
   const [sessionList, setSessionList] = useState(JSON.parse(localStorage.getItem('copilot_session_list') || '[]'));
   useEffect(() => {
-    setCurSession(sessionList[0].key);
+    if(sessionList.length > 0) {
+      setCurSession(sessionList[0].key);
+    }else {
+      handleNewSessionFn();
+    }
   }, []);
   // 在组件中添加 ref
   const chatListRef = useRef<HTMLDivElement>(null);
@@ -221,6 +225,7 @@ const Copilot = (props: CopilotProps) => {
               }}
             >
               <span>{item.label}</span>
+              { sessionList.length > 1 && 
               <CloseOutlined
                 style={{ marginLeft: 8, color: '#bbb', fontSize: 14, cursor: 'pointer' }}
                 onClick={e => {
@@ -228,6 +233,7 @@ const Copilot = (props: CopilotProps) => {
                   handlerDeleteSession(item.key);
                 }}
               />
+              }
             </div>
           ))}
         </div>
